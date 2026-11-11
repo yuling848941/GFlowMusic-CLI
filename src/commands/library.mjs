@@ -1,5 +1,6 @@
-// Library, playlists, projects, discovery and chat-session commands.
+// Library, history catalog, playlists, projects, discovery and chat-session commands.
 import { loadState } from "../lib/state.mjs";
+import { loadCatalog, searchCatalog, findCatalogClip, recordCatalog } from "../lib/catalog.mjs";
 
 export default (c) => {
   const { opts, f, log, need, num, readText, clipUrl, dur, emit, dbg, T, applyModel, waitClips, download, FORMATS, materialize, songLine, finish, createSong, renderEdit, baseTitle, seed, userId, listAllOwn, saveUrl } = c;
@@ -8,6 +9,56 @@ export default (c) => {
       const r = await f.get(`/clips/user/${await userId()}`, { limit: Math.min(num(opts.n, 20), 100), public_only: false });
       emit(r.clips.map((c) => `${c.id}  ${(c.created_at || "").slice(0, 16)}  ${dur(c).padStart(6)}s  ${c.is_favorite ? "★ " : ""}${c.title}`).join("\n"), r.clips);
     },
+
+    async history() {
+      const sub = opts._[1] || "list";
+      const fmtRow = (r) => `${(r.clip_id || "-").slice(0, 8).padEnd(8)}  ${(r.timestamp || "").slice(0, 16)}  [${(r.op || "gen").padEnd(5)}]  ${String((r.duration ?? 0) + "s").padStart(6)}  ${r.title || "Untitled"}${r.preset ? `  (${r.preset})` : ""}${r.files?.length ? `\n    └─ ${r.files.join(" | ")}` : ""}`;
+      if (sub === "search") {
+        const q = need(opts._.slice(2).join(" "), "search query");
+        const rows = searchCatalog(q, num(opts.n, 25));
+        return emit(rows.length ? rows.map(fmtRow).join("\n") : "no matching history entries", rows);
+      }
+      if (sub === "show") {
+        const id = need(opts._[2], "clip id");
+        const item = findCatalogClip(id);
+        if (!item) throw new Error(`no local catalog entry matching "${id}"`);
+        const lines = [
+          `Title:      ${item.title || "Untitled"}`,
+          `Clip ID:    ${item.clip_id || "-"}`,
+          `Operation:  ${item.op || "gen"}  (${item.timestamp})`,
+          `Duration:   ${item.duration ?? "-"}s${item.bpm ? `  BPM: ${item.bpm}` : ""}`,
+          ...(item.preset ? [`Preset:     ${item.preset}`] : []),
+          ...(item.raw_prompt ? [`Raw Prompt: ${item.raw_prompt}`] : []),
+          ...(item.prompt ? [`Prompt:     ${item.prompt}`] : []),
+          ...(item.files?.length ? [`Files:\n  ${item.files.join("\n  ")}`] : []),
+        ];
+        return emit(lines.join("\n"), item);
+      }
+      if (sub === "sync") {
+        const remote = await listAllOwn(num(opts.n, 200));
+        const existingIds = new Set(loadCatalog().map((x) => x.clip_id).filter(Boolean));
+        let added = 0;
+        for (const clip of [...remote].reverse()) {
+          if (!existingIds.has(clip.id)) {
+            recordCatalog({
+              timestamp: clip.created_at || new Date().toISOString(),
+              op: clip.op_type || "sync",
+              clip_id: clip.id,
+              title: clip.title,
+              duration: Number(dur(clip)),
+              url: clipUrl(clip.id),
+              lyrics: clip.lyrics?.value?.text || null,
+            });
+            added++;
+          }
+        }
+        return emit(`synced ${added} new clips from cloud (${remote.length} checked)`, { added, total: remote.length });
+      }
+      const limit = num(opts.n, 20);
+      const rows = (sub !== "list" ? searchCatalog( opts._.slice(1).join(" "), limit) : loadCatalog().slice(0, limit));
+      emit(rows.length ? rows.map(fmtRow).join("\n") : "local catalog is empty (run `flowmusic history sync` or generate a song)", rows);
+    },
+
     async show() {
       const id = need(opts._[1], "clip id");
       const c = (await f.clips([id]))[id];

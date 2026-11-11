@@ -1,9 +1,12 @@
-// Creation commands: gen, batch, chat, wizard, lyrics, image, video, upload.
+// Creation commands: gen, batch, presets, expand, mcp, chat, wizard, lyrics, image, video, upload.
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { loadState, patchState } from "../lib/state.mjs";
 import { clipIds, parseBatchLines, pool, sleep } from "../lib/util.mjs";
+import { PRESETS, formatPresetsList, buildProfessionalPrompt } from "../lib/presets.mjs";
+import { batchSpecHash, getCompletedBatchEntry, saveBatchLedgerEntry } from "../lib/catalog.mjs";
+import { startMcpServer } from "../lib/mcp.mjs";
 
 export default (c) => {
   const { opts, f, log, need, num, readText, clipUrl, dur, emit, dbg, T, applyModel, waitClips, download, FORMATS, materialize, songLine, finish, createSong, renderEdit, baseTitle, seed, userId, listAllOwn, saveUrl } = c;
@@ -14,14 +17,60 @@ export default (c) => {
       emit(songs.map(songLine).join("\n"), { songs });
     },
 
+    async presets() {
+      const cat = opts.category || opts._[1] || "";
+      emit(formatPresetsList(cat), { presets: PRESETS });
+    },
+
+    async expand() {
+      const rawPrompt = opts._.slice(1).join(" ");
+      if (!rawPrompt && !opts.preset) need(null, "prompt or --preset");
+      const res = buildProfessionalPrompt({
+        prompt: rawPrompt,
+        preset: opts.preset,
+        expand: true,
+        bpm: opts.bpm,
+        instrumental: opts.instrumental,
+        loop: opts.loop,
+      });
+      emit(
+        `Prompt: ${res.prompt}\nBPM:    ${res.bpm ?? "auto"}\nMode:   ${res.instrumental ? "Instrumental" : "Vocal / Auto"}${res.presetUsed ? `\nPreset: ${res.presetUsed.name} (${res.presetUsed.title})` : ""}`,
+        res
+      );
+    },
+
+    async mcp() {
+      await startMcpServer(c, { noSpend: Boolean(opts["no-spend"]) });
+    },
+
     async batch() {
       await applyModel();
       const specs = parseBatchLines(fs.readFileSync(need(opts._[1], "batch file"), "utf8"));
       if (!specs.length) throw new Error("no prompts in batch file");
       const jobs = Math.min(5, Math.max(1, num(opts.jobs, 2))); // web client allows max 5 concurrent
-      log(`batch: ${specs.length} songs, ${jobs} at a time`);
+      log(`batch: ${specs.length} songs, ${jobs} at a time${opts.resume ? " (resume enabled)" : ""}`);
       const res = await pool(specs, jobs, async (s, i) => {
-        const songs = await createSong({ model: opts.model, length: opts.length, ...s }, { quiet: true });
+        const merged = {
+          model: opts.model,
+          length: opts.length,
+          preset: opts.preset,
+          expand: opts.expand,
+          loop: opts.loop,
+          "auto-peak": opts["auto-peak"],
+          demo: opts.demo,
+          stems: opts.stems,
+          ...s,
+        };
+        const hash = batchSpecHash(merged);
+        if (opts.resume) {
+          const cached = getCompletedBatchEntry(hash);
+          if (cached) {
+            log(`[${i + 1}/${specs.length}] skipped (cached in ledger): ${cached.songs.map((x) => x.title).join(", ")}`);
+            return cached.songs;
+          }
+        }
+        const songs = await createSong(merged, { quiet: true });
+        saveBatchLedgerEntry(hash, merged, songs);
         log(`[${i + 1}/${specs.length}] done: ${songs.map((x) => x.title).join(", ")}`);
         return songs;
       });
@@ -49,16 +98,29 @@ export default (c) => {
       const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
       try {
         const ask = async (q, d = "") => ((await rl.question(`${q}${d ? ` [${d}]` : ""}: `)).trim() || d);
-        const prompt = need(await ask("Style / description (e.g. dreamy synthwave, female vocals)"), "description");
-        const instrumental = /^y/i.test(await ask("Instrumental? (y/n)", "n"));
+        const preset = await ask("Preset (e.g. entrance-epic, lofi-study, guofeng-epic, or empty)");
+        const prompt = await ask("Style / description (e.g. dreamy synthwave, female vocals)");
+        if (!prompt && !preset) need(null, "description or preset");
+        const instrumental = /^y/i.test(await ask("Instrumental? (y/n)", preset && PRESETS[preset]?.instrumental ? "y" : "n"));
         const lyrics = instrumental ? "" : await ask("Lyrics (text, @file, or empty for auto)");
-        const title = await ask("Title", prompt.split(/\s+/).slice(0, 4).join(" "));
+        const title = await ask("Title", (prompt || preset).split(/\s+/).slice(0, 4).join(" "));
         const length = await ask("Target length in seconds (min ~60, empty = auto)");
+        const loop = await ask("Seamless loop cut in seconds (e.g. 15, or empty for none)");
         const { models } = await f.get("/models");
         const model = await ask(`Model (${models.map((m) => m.public_name).join(" / ")})`, models.find((m) => m.is_default)?.public_name);
         Object.assign(opts, { model });
         await applyModel();
-        const songs = await createSong({ prompt, instrumental, lyrics, title, length: length || undefined });
+        const songs = await createSong({
+          prompt,
+          preset: preset || undefined,
+          expand: true,
+          instrumental,
+          lyrics,
+          title,
+          length: length || undefined,
+          loop: loop || undefined,
+          "auto-peak": true,
+        });
         emit(songs.map(songLine).join("\n"), { songs });
       } finally { rl.close(); }
     },

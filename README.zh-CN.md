@@ -20,15 +20,21 @@ npx flowmusic-cli gen "lofi piano" --instrumental   # 或者不安装,直接用 
 
 ```bash
 flowmusic login                                   # 首次登录(见「登录认证」)
+flowmusic presets [category]                      # 查看 9 大类 24 款社区级专业音乐预设
+flowmusic expand "大气国风仙侠" --loop 15          # 零积分预览 6 维公式扩写后的专业 Prompt
+flowmusic gen "领导登场" --preset entrance-epic --loop 15 --auto-peak --demo 3   # 一键生成+自动寻峰切 15s 无缝循环
 flowmusic gen "dreamy synthwave, female vocals" --lyrics @lyrics.txt --title "Night Drive" --model "Lyria 3 Pro"
 flowmusic gen "lofi piano" --instrumental --length 120 --wav
-flowmusic batch prompts.txt --jobs 3               # 每行一个提示词(或 JSON 对象)
+flowmusic batch prompts.txt --jobs 3 --resume     # 批量生成(--resume 开启本地账本断点续传,防重复扣费)
+flowmusic loop <clip|wav> --length 15 --auto-peak # 本地无损等功率交叉淡化制作单曲无缝循环
 flowmusic extend|replace|cover|stems|trim|speed <clip> ...
-flowmusic download <clip> --format mp3             # mp3 | wav | m4a(服务端转码)
-flowmusic caption|transcribe <clip>                # 描述曲风 / 从音频识别歌词
+flowmusic history [list|search <q>|show <id>|sync] # 本地离线资产目录检索与云端同步
+flowmusic mcp [--no-spend]                        # 启动内置零依赖 MCP Server(--no-spend 屏蔽扣费工具)
+flowmusic download <clip> --format mp3            # mp3 | wav | m4a(服务端转码)
+flowmusic caption|transcribe <clip>               # 描述曲风 / 从音频识别歌词
 flowmusic search clips "piano"  |  trending  |  featured
 flowmusic playlists create|add|remove|rename|delete|show ...
-flowmusic doctor                                   # 检查会话与接口结构是否正常
+flowmusic doctor                                  # 检查会话与接口结构是否正常
 flowmusic help
 ```
 
@@ -41,7 +47,7 @@ bin/flowmusic.mjs      命令行入口
 src/cli.mjs            参数解析、别名与命令分发
 src/help.mjs           帮助文本
 src/commands/          各类命令:create、edit、library、account,以及共享的 context
-src/lib/               底层模块:client、auth、state、config、util、chrome_auth
+src/lib/               底层模块:client、auth、state、config、util、chrome_auth、presets、audio、catalog、mcp
 test/                  单元测试(node --test)
 skills/                给 AI 代理使用的技能
 ```

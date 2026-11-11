@@ -3,7 +3,8 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const VALUE_FLAGS = new Set(["-o", "--out", "-c", "--conversation", "-n", "--lyrics", "--title", "--bpm", "--length", "--seed", "--image-id",
   "--prompt", "--seconds", "--from", "--region", "--strength", "--start", "--end", "--aspect", "--duration", "--model", "--jobs", "--to",
-  "--prefix", "--format", "--description", "--factor", "--semitones", "--zip"]);
+  "--prefix", "--format", "--description", "--factor", "--semitones", "--zip",
+  "--preset", "--loop", "--crossfade", "--demo", "--category"]);
 const ALIAS = { o: "out", c: "conversation" };
 
 /** Tiny argv parser: positional args in `_`, value flags, boolean flags, repeatable --region. */

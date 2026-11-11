@@ -3,6 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { Flow, lyricsId, INSTRUMENTAL } from "../lib/client.mjs";
 import { clipIds, composeSong, unescapeNewlines, fmtDuration, sleep } from "../lib/util.mjs";
+import { buildProfessionalPrompt } from "../lib/presets.mjs";
+import { createSeamlessLoop, trimWavLocal } from "../lib/audio.mjs";
+import { recordCatalog, findCatalogClip } from "../lib/catalog.mjs";
 
 export const log = (...a) => console.error(...a);
 export const need = (v, what) => { if (v == null || v === "") throw new Error(`missing ${what} (see: flowmusic help)`); return v; };
@@ -80,7 +83,7 @@ export function createContext(opts) {
   }
 
   /** Wait for + download the clips named in a tool result. Returns plain result objects. */
-  async function materialize(content, label, { quiet = false } = {}) {
+  async function materialize(content, label, { quiet = false, meta = {}, forceWav = false } = {}) {
     const ids = clipIds(content);
     if (!ids.length) return null;
     if (!quiet) log(`${label}: queued ${ids.map((i) => i.slice(0, 8)).join(", ")}${content.estimated_time ? ` (~${content.estimated_time}s)` : ""}`);
@@ -93,28 +96,186 @@ export function createContext(opts) {
       if (stems[id]) r.stem = stems[id];
       if (content.clip_id_b && id === content.clip_id_b) r.variant = "B";
       else if (content.clip_id_b && i === 0) r.variant = "A";
-      if (!opts["no-download"]) r.file = await download(id, c);
+      if (!opts["no-download"]) {
+        r.file = await download(id, c, opts.out || "out", forceWav ? "wav" : undefined);
+      }
+      recordCatalog({
+        op: label,
+        clip_id: id,
+        title: c.title,
+        duration: r.duration,
+        file: r.file || null,
+        url: r.url,
+        stem: r.stem || null,
+        variant: r.variant || null,
+        ...meta,
+      });
       out.push(r);
     }
     return out;
   }
-  const songLine = (r) => `${r.file || r.url}${r.stem ? `  [${r.stem}]` : ""}${r.variant ? `  [${r.variant}]` : ""}  (${r.duration}s)`;
+  const songLine = (r) => {
+    let base = `${r.file || r.url}${r.stem ? `  [${r.stem}]` : ""}${r.variant ? `  [${r.variant}]` : ""}  (${r.duration}s)`;
+    if (r.loop_file) base += `\n  └─ loop: ${r.loop_file}${r.loop_mp3 ? ` | ${r.loop_mp3}` : ""}${r.demo_file ? ` | demo: ${r.demo_file}` : ""} (${r.loop_duration}s from ${r.loop_start}s)`;
+    return base;
+  };
   async function finish(content, label, extra = {}) {
     const songs = await materialize(content, label);
     if (!songs) return emit(JSON.stringify(content, null, 2), { result: content, ...extra });
     emit(songs.map(songLine).join("\n"), { ...extra, songs });
   }
 
+  /** Resolve a target (local WAV file path, full clip_id, or short clip_id prefix) into a local WAV file. */
+  async function resolveWavInput(target) {
+    if (fs.existsSync(target) && /\.wav$/i.test(target)) {
+      return { wavFile: target, clipId: null, title: path.basename(target, path.extname(target)) };
+    }
+    const cat = findCatalogClip(target);
+    const existingWav = cat?.files?.find((x) => x && /\.wav$/i.test(x) && fs.existsSync(x));
+    if (existingWav) {
+      return { wavFile: existingWav, clipId: cat.clip_id, title: cat.title || target };
+    }
+    const fullId = cat?.clip_id || target;
+    const wavFile = await download(fullId, null, opts.out || "out", "wav");
+    return { wavFile, clipId: fullId, title: cat?.title || path.basename(wavFile, ".wav") };
+  }
+
+  /** Run local lossless seamless loop cutting on a WAV file or clip_id. */
+  async function runLoopTask(target, {
+    loopSec = 15,
+    startSec = null,
+    autoPeak = false,
+    crossfadeSec = 1.5,
+    demoCount = 0,
+    outDir = opts.out || "out",
+  } = {}) {
+    const { wavFile, clipId, title } = await resolveWavInput(target);
+    const cleanBase = path.basename(wavFile, ".wav").replace(/-loop-\d+s.*$/i, "");
+    const outWav = path.join(outDir, `${cleanBase}-loop-${loopSec}s.wav`);
+    const res = createSeamlessLoop(wavFile, outWav, {
+      loopSec,
+      startSec,
+      autoPeak,
+      crossfadeSec,
+      demoCount,
+      exportMp3: true,
+    });
+    recordCatalog({
+      op: "loop",
+      clip_id: clipId,
+      title: `${title} (${loopSec}s loop)`,
+      duration: res.duration,
+      loop_start: res.startSec,
+      crossfade: res.crossfadeSec,
+      peak_db: res.peakDb,
+      file: res.wavFile,
+      files: [res.wavFile, res.mp3File, res.demoFile].filter(Boolean),
+    });
+    return res;
+  }
+
+  /** Run local lossless trim on a WAV file or clip_id. */
+  async function runLocalTrim(target, { startSec = 0, endSec, outDir = opts.out || "out" } = {}) {
+    const { wavFile, clipId, title } = await resolveWavInput(target);
+    const cleanBase = path.basename(wavFile, ".wav");
+    const outWav = path.join(outDir, `${cleanBase}-trim-${startSec}-${endSec}s.wav`);
+    const res = trimWavLocal(wavFile, outWav, { startSec, endSec, exportMp3: true });
+    recordCatalog({
+      op: "trim",
+      clip_id: clipId,
+      title: `${title} (trim ${startSec}-${endSec}s)`,
+      duration: res.duration,
+      file: res.wavFile,
+      files: [res.wavFile, res.mp3File].filter(Boolean),
+    });
+    return res;
+  }
+
   // ---------- song building blocks ----------
   async function createSong(spec, { quiet = false } = {}) {
-    const prompt = need(spec.prompt, "sound prompt");
+    const rawPrompt = spec.prompt || "";
+    if (!rawPrompt && !spec.preset) need(null, "sound prompt or --preset");
+
+    const built = buildProfessionalPrompt({
+      prompt: rawPrompt,
+      preset: spec.preset,
+      expand: Boolean(spec.expand || spec.preset),
+      bpm: spec.bpm,
+      instrumental: spec.instrumental,
+      loop: spec.loop,
+    });
+
+    const prompt = built.prompt;
+    if ((spec.preset || spec.expand) && !quiet) {
+      log(`> prompt${spec.preset ? ` [${spec.preset}]` : ""}: ${prompt}`);
+    }
+
     const lyrics = spec.lyrics ? readText(spec.lyrics) : "";
-    const { sound_prompt, lyricsText } = composeSong({ prompt, lyrics, instrumental: spec.instrumental, length: spec.length, bpm: spec.bpm }, INSTRUMENTAL);
+    const { sound_prompt, lyricsText } = composeSong({
+      prompt,
+      lyrics,
+      instrumental: built.instrumental,
+      length: spec.length,
+      bpm: built.bpm,
+    }, INSTRUMENTAL);
     const id = lyricsId(lyricsText);
     if (id) f.lyricsMap[id] = lyricsText;
-    const title = spec.title || prompt.split(/\s+/).slice(0, 5).join(" ");
-    const content = await T("audio__create_song", { sound_prompt, lyrics_id: id, title, seed: spec.seed != null ? Number(spec.seed) : null, image_id: spec["image-id"] || spec.image_id || null });
-    return materialize(content, "gen", { quiet });
+    const title = spec.title || (spec.preset ? `${spec.preset} ${rawPrompt}`.trim() : prompt.split(/\s+/).slice(0, 5).join(" "));
+    const content = await T("audio__create_song", {
+      sound_prompt,
+      lyrics_id: id,
+      title,
+      seed: spec.seed != null ? Number(spec.seed) : null,
+      image_id: spec["image-id"] || spec.image_id || null,
+    });
+
+    const wantLoop = spec.loop != null && Number(spec.loop) > 0;
+    const songs = await materialize(content, "gen", {
+      quiet,
+      forceWav: wantLoop || Boolean(spec.wav),
+      meta: {
+        raw_prompt: rawPrompt,
+        prompt: sound_prompt,
+        preset: spec.preset || null,
+        bpm: built.bpm || null,
+        lyrics: lyrics || null,
+        model: f.extraContext.selected_model || null,
+      },
+    });
+
+    // Pipeline stage 1: auto seamless loop cutting
+    if (wantLoop && songs?.length && !opts["no-download"]) {
+      for (const s of songs) {
+        if (s.file && /\.wav$/i.test(s.file)) {
+          const loopRes = await runLoopTask(s.file, {
+            loopSec: Number(spec.loop),
+            startSec: spec.start != null ? Number(spec.start) : null,
+            autoPeak: Boolean(spec["auto-peak"] ?? spec.autoPeak ?? true),
+            crossfadeSec: Number(spec.crossfade || 1.5),
+            demoCount: Number(spec.demo || 0),
+          });
+          s.loop_file = loopRes.wavFile;
+          s.loop_mp3 = loopRes.mp3File;
+          s.demo_file = loopRes.demoFile;
+          s.loop_duration = loopRes.duration;
+          s.loop_start = loopRes.startSec;
+        }
+      }
+    }
+
+    // Pipeline stage 2: auto stems splitting
+    if (spec.stems && songs?.length) {
+      const stemOut = [];
+      for (const s of songs) {
+        if (!quiet) log(`pipeline: splitting stems for ${s.clip_id.slice(0, 8)}...`);
+        const stContent = await T("audio__split_stems", { clip_id: s.clip_id });
+        const stSongs = await materialize(stContent, "stems", { quiet });
+        if (stSongs) stemOut.push(...stSongs);
+      }
+      songs.push(...stemOut);
+    }
+
+    return songs;
   }
 
   async function renderEdit(clip, node, title) {
@@ -151,5 +312,5 @@ export function createContext(opts) {
     return file;
   }
 
-  return { opts, f, log, need, num, readText, clipUrl, dur, emit, dbg, T, applyModel, waitClips, download, FORMATS, materialize, songLine, finish, createSong, renderEdit, baseTitle, seed, userId, listAllOwn, saveUrl };
+  return { opts, f, log, need, num, readText, clipUrl, dur, emit, dbg, T, applyModel, waitClips, download, FORMATS, materialize, songLine, finish, createSong, renderEdit, baseTitle, seed, userId, listAllOwn, saveUrl, runLoopTask, runLocalTrim };
 }

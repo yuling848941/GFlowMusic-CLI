@@ -1,8 +1,8 @@
-// Edit and analysis commands: extend, replace, cover, stems, trim, speed, convert, modify, caption, transcribe.
+// Edit and analysis commands: extend, replace, cover, stems, loop, trim, speed, convert, modify, caption, transcribe.
 import { clipIds } from "../lib/util.mjs";
 
 export default (c) => {
-  const { opts, f, log, need, num, readText, clipUrl, dur, emit, dbg, T, applyModel, waitClips, download, FORMATS, materialize, songLine, finish, createSong, renderEdit, baseTitle, seed, userId, listAllOwn, saveUrl } = c;
+  const { opts, f, log, need, num, readText, clipUrl, dur, emit, dbg, T, applyModel, waitClips, download, FORMATS, materialize, songLine, finish, createSong, renderEdit, baseTitle, seed, userId, listAllOwn, saveUrl, runLoopTask, runLocalTrim } = c;
   return {
     async extend() {
       const clip = need(opts._[1], "clip id");
@@ -19,13 +19,41 @@ export default (c) => {
       await finish(await renderEdit(clip, { node_type: "CoverSong", instruction: need(opts.prompt, "--prompt"), strength: num(opts.strength, 0.5), seed: seed() }, opts.title || (await baseTitle(clip, "cover"))), "cover");
     },
     async stems() { await finish(await T("audio__split_stems", { clip_id: need(opts._[1], "clip id") }), "stems"); },
-    async trim() {
-      const clip = need(opts._[1], "clip id");
-      await finish(await T("audio__apply_effect", {
-        graph: [{ node_type: "Input", node_id: "input", track_id: clip }, { node_type: "Trim", node_id: "trim", input_ids: ["input"], start_s: num(need(opts.start, "--start")), end_s: num(need(opts.end, "--end")) }, { node_type: "Output", input_ids: ["trim"] }],
-        output_title: opts.title || (await baseTitle(clip, "trim")),
-      }), "trim");
+
+    async loop() {
+      const target = need(opts._[1], "clip id or local wav file");
+      const loopSec = num(opts.length || opts.loop || opts.seconds, 15);
+      const startSec = opts.start != null ? Number(opts.start) : null;
+      const autoPeak = Boolean(opts["auto-peak"] || startSec == null);
+      const crossfadeSec = num(opts.crossfade, 1.5);
+      const demoCount = num(opts.demo, 0);
+      const res = await runLoopTask(target, { loopSec, startSec, autoPeak, crossfadeSec, demoCount });
+      const lines = [`${res.wavFile}  (${res.duration}s seamless loop, start=${res.startSec}s, crossfade=${res.crossfadeSec}s${res.peakDb != null ? `, peak=${res.peakDb}dB` : ""})`];
+      if (res.mp3File) lines.push(`  mp3:  ${res.mp3File}`);
+      if (res.demoFile) lines.push(`  demo: ${res.demoFile}`);
+      emit(lines.join("\n"), res);
     },
+
+    async trim() {
+      const clip = need(opts._[1], "clip id or local wav file");
+      const startS = num(need(opts.start, "--start"));
+      const endS = num(need(opts.end, "--end"));
+      if (opts.local || /\.wav$/i.test(clip)) {
+        const res = await runLocalTrim(clip, { startSec: startS, endSec: endS });
+        return emit(`${res.wavFile}${res.mp3File ? ` | ${res.mp3File}` : ""}  (${res.duration}s)`, res);
+      }
+      try {
+        await finish(await T("audio__apply_effect", {
+          graph: [{ node_type: "Input", node_id: "input", track_id: clip }, { node_type: "Trim", node_id: "trim", input_ids: ["input"], start_s: startS, end_s: endS }, { node_type: "Output", input_ids: ["trim"] }],
+          output_title: opts.title || (await baseTitle(clip, "trim")),
+        }), "trim");
+      } catch (e) {
+        log(`server trim failed (${e.message}); falling back to local lossless WAV trim...`);
+        const res = await runLocalTrim(clip, { startSec: startS, endSec: endS });
+        emit(`${res.wavFile}${res.mp3File ? ` | ${res.mp3File}` : ""}  (${res.duration}s)`, res);
+      }
+    },
+
     async speed() {
       const clip = need(opts._[1], "clip id");
       const speed = num(opts.factor, 1), semitones = num(opts.semitones, 0);
