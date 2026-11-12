@@ -26,7 +26,7 @@ test("sanitizeMusicPrompt removes banned anti-patterns and translates Chinese co
   const dirty = "Please make a song about 领导登场, best quality, 320kbps, masterpiece, guitars and drums";
   const clean = sanitizeMusicPrompt(dirty);
   assert.doesNotMatch(clean, /best quality|320kbps|masterpiece|Please make/i);
-  assert.match(clean, /triumphant ceremonial orchestral entrance fanfare/i);
+  assert.match(clean, /triumphant .* orchestral entrance fanfare/i);
   assert.match(clean, /articulate acoustic\/electric guitars/i);
 });
 
@@ -39,7 +39,7 @@ test("buildProfessionalPrompt applies 6-Component Sonic Formula and presets", ()
   const p2 = buildProfessionalPrompt({ prompt: "custom brass lead", preset: "entrance-epic", loop: 15 });
   assert.equal(p2.bpm, 128);
   assert.equal(p2.instrumental, true);
-  assert.match(p2.prompt, /Epic triumphant ceremonial orchestral anthem/);
+  assert.match(p2.prompt, /triumphant ceremonial orchestral anthem/i);
   assert.match(p2.prompt, /custom brass lead/);
   assert.match(p2.prompt, /seamless looping/);
 });
@@ -156,5 +156,5 @@ test("MCP Server JSON-RPC 2.0 handler and --no-spend guard", async () => {
   }, {}, { noSpend: true });
   const payload = JSON.parse(expanded.result.content[0].text);
   assert.equal(payload.bpm, 128);
-  assert.match(payload.prompt, /Epic triumphant ceremonial orchestral anthem/);
+  assert.match(payload.prompt, /triumphant ceremonial orchestral anthem/i);
 });

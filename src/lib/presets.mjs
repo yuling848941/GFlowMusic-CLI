@@ -28,9 +28,10 @@ const VAGUE_UPGRADES = [
  * Bilingual Chinese -> Professional English Sonic Concept Dictionary
  */
 const CN_CONCEPT_MAP = [
-  [/(?:大型活动)?(?:领导登场|嘉宾登场|贵宾入场|高光登场|颁奖盛典|隆重登场)+/g, "triumphant ceremonial orchestral entrance fanfare, soaring heroic brass horns, driving snare and timpani crescendo, grand gala hall acoustics"],
-  [/(?:迎宾|入场仪式|进行曲|庆典)+/g, "dignified symphonic ceremonial march, majestic brass ensemble, steady ceremonial percussion"],
-  [/(?:史诗|宏大|磅礴|气势|震撼|激昂|超燃|热血|恢弘|大气)+/g, "epic triumphant hybrid orchestral, soaring brass fanfare, thunderous cinematic percussion, powerful climactic crescendo, high-octane uplifting energy"],
+  [/(?:大型活动)?(?:领导登场|嘉宾登场|贵宾入场|高光登场|颁奖盛典|隆重登场)+/g, "triumphant celebratory orchestral entrance fanfare in bright major key, soaring radiant trumpets and French horns, driving joyful snare and timpani crescendo, prestigious gala hall acoustics"],
+  [/(?:迎宾|入场仪式|进行曲|庆典)+/g, "dignified symphonic ceremonial march in uplifting major key, majestic brass ensemble, steady celebratory percussion"],
+  [/(?:激情|激动|正向|积极|昂扬|奋进|欢庆|自豪)+/g, "passionate, exhilarating, deeply uplifting, pure positive energy, enthusiastic joy, bright triumphant major key, inspiring celebratory momentum"],
+  [/(?:史诗|宏大|磅礴|气势|震撼|激昂|超燃|热血|恢弘|大气)+/g, "radiant triumphant symphonic anthem in major key, soaring brass fanfare, crisp driving percussion, powerful celebratory crescendo, high-octane uplifting positive energy"],
   [/(?:国风|古风|仙侠|武侠|东方|中国风|古装)+/g, "grand Oriental cinematic fusion, expressive bamboo flute (Dizi), plucked Guzheng arpeggios, Pipa and Erhu melodies, sweeping symphonic strings"],
   [/(?:禅意|江南|竹林|茶道|古琴|山水)+/g, "serene Oriental Zen acoustic, resonant Guqin zither, gentle Xiao bamboo flute, peaceful minimalist ambiance"],
   [/(?:科技感?|发布会|未来感?|人工智能|数字|创新)+/g, "futuristic tech keynote electronic, plucky analog synth arpeggios, deep sub-bass pulse, crisp minimal percussive groove, glossy wide stereo mix"],
@@ -58,16 +59,27 @@ const CN_CONCEPT_MAP = [
  */
 export const PRESETS = {
   // --- 1. Ceremony, Gala & Broadcast (大型盛典、礼仪、发布会登场与广播) ---
+  "entrance-jubilant": {
+    category: "Ceremony & Gala",
+    title: "高光激情盛典 / 阳光正向登场 (Joyous Triumphant Entrance)",
+    bpm: 126,
+    instrumental: true,
+    genre: "Uplifting celebratory symphonic fanfare in bright major key",
+    mood: "passionate, exhilarating, jubilant, deeply inspiring, pure positive energy, enthusiastic, celebratory triumph, radiant warmth, absolutely no dark or melancholy tones",
+    instruments: "radiant heraldic trumpets in bright high register, soaring French horns, shimmering orchestral glockenspiel and chimes, uplifting violin section in major harmonies, crisp celebratory military snare rolls, resonant joyous timpani and bright crash cymbals",
+    rhythm: "driving energetic uplifting march rhythm with buoyant celebratory forward momentum",
+    production: "sparkling radiant grand hall acoustics, glorious warm air, punchy clear dynamic mix, uplifting festival atmosphere",
+  },
   "entrance-epic": {
     category: "Ceremony & Gala",
     title: "高光激昂登场 / 盛典巅峰 (Epic Triumphant Entrance)",
     bpm: 128,
     instrumental: true,
-    genre: "Epic triumphant ceremonial orchestral anthem",
-    mood: "thrilling, electrifying, victorious, majestic peak stadium energy",
-    instruments: "soaring heraldic trumpets and French horn fanfare, sweeping legato string orchestra, thunderous taiko drums and booming timpani crescendo, bright crash cymbals",
-    rhythm: "driving energetic ceremonial march beat with powerful percussive builds",
-    production: "wide grand gala concert hall acoustics, punchy low-end impact, pristine dynamic mastering",
+    genre: "Uplifting triumphant ceremonial orchestral anthem in radiant major key",
+    mood: "thrilling, electrifying, victorious, enthusiastic, celebratory, bright optimistic energy, majestic peak stadium excitement, positive and heroic",
+    instruments: "soaring heraldic trumpets and triumphant French horn fanfare, uplifting melodic string orchestra, driving crisp snare rolls, thunderous joyful timpani crescendo, sparkling chimes and bright crash cymbals",
+    rhythm: "driving energetic ceremonial march beat with celebratory percussive builds",
+    production: "wide grand gala concert hall acoustics, bright shimmering highs, punchy low-end impact, glorious major key mastering",
   },
   "entrance-grand": {
     category: "Ceremony & Gala",
